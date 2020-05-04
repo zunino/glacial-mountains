@@ -22,6 +22,10 @@ namespace {
     constexpr Texture_Slice mountains{384, 0, DEFAULT_WIDTH, DEFAULT_HEIGHT};
     constexpr Texture_Slice fg_clouds_2{0, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
     constexpr Texture_Slice fg_clouds_1{384, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+    constexpr Texture_Slice credits{384, 432, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+
+    constexpr int CREDITS_DELAY = 2000;
+    constexpr int CREDITS_SPEED = 2;
 }
 
 SDL_Texture* load_texture(SDL_Renderer* renderer, std::string_view path) {
@@ -72,12 +76,14 @@ struct Layer {
     Layer(const Texture_Slice& t_slice, float speed_factor) :
         speed_factor{speed_factor},
         t_slice{t_slice},
-        dest_x{0.0f}
+        dest_x{0.0f},
+        dest_y{0.0f}
     {
     }
     Texture_Slice t_slice;
     float speed_factor; // 1: camera speed; 0.5: half that etc.
     float dest_x;
+    float dest_y;
 };
 
 struct Camera {
@@ -90,17 +96,27 @@ struct Scene {
         layers{
             Layer{bg_clouds, 0.15f},
             Layer{mountains, 0.25f},
+            Layer{credits, 0.0f},
             Layer{fg_clouds_2, 0.50f},
             Layer{fg_clouds_1, 0.75f}
         }
     {
+        credits_layer = &layers[2];
+        credits_layer->dest_y = WINDOW_HEIGHT; // credits off-screen to the bottom
     }
     ~Scene() {
         SDL_DestroyTexture(texture);
     }
     SDL_Texture* texture;
-    std::array<Layer, 4> layers;
+    std::array<Layer, 5> layers;
     Camera camera{4.0f};
+    Layer* credits_layer;
+};
+
+struct Timer {
+    Timer() : start{SDL_GetTicks()} {}
+    uint32_t elapsed() { return SDL_GetTicks() - start; }
+    uint32_t start;
 };
 
 bool handle_input() {
@@ -120,12 +136,19 @@ bool handle_input() {
     return true;
 }
 
-void update_scene(Scene& scene) {
+void update_scene(Scene& scene, Timer& timer) {
     for (Layer& layer : scene.layers) {
         layer.dest_x -= scene.camera.x_speed * layer.speed_factor;
         if (layer.dest_x < -WINDOW_WIDTH) {
             layer.dest_x += WINDOW_WIDTH;
         }
+    }
+    if (scene.credits_layer->dest_y > 0 && timer.elapsed() >= CREDITS_DELAY) {
+        float dest_y = scene.credits_layer->dest_y - CREDITS_SPEED;
+        if (dest_y < 0) {
+            dest_y = 0;
+        }
+        scene.credits_layer->dest_y = dest_y;
     }
 }
 
@@ -135,7 +158,7 @@ void render_scene(Sdl& sdl, Scene& scene) {
     for (const Layer& layer : scene.layers) {
         SDL_Rect src{layer.t_slice.x, layer.t_slice.y, layer.t_slice.w, layer.t_slice.h};
         for (int i = 0, dest_x = layer.dest_x; i < 3; ++i) {
-            SDL_Rect dst{dest_x, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
+            SDL_Rect dst{dest_x, int(layer.dest_y), WINDOW_WIDTH, WINDOW_HEIGHT};
             SDL_RenderCopy(sdl.renderer, scene.texture, &src, &dst);
             dest_x += WINDOW_WIDTH;
         }
@@ -146,10 +169,11 @@ void render_scene(Sdl& sdl, Scene& scene) {
 int main() {
     Sdl sdl;
     Scene scene{sdl};
+    Timer timer;
     bool run = true;
     while (run) {
         run = handle_input();
-        update_scene(scene);
+        update_scene(scene, timer);
         render_scene(sdl, scene);
     }
 }
