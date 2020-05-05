@@ -23,9 +23,6 @@ namespace {
     constexpr Texture_Slice fg_clouds_2{0, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
     constexpr Texture_Slice fg_clouds_1{384, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
     constexpr Texture_Slice credits{384, 432, DEFAULT_WIDTH, DEFAULT_HEIGHT};
-
-    constexpr int CREDITS_DELAY = 2000;
-    constexpr int CREDITS_SPEED = 2;
 }
 
 SDL_Texture* load_texture(SDL_Renderer* renderer, std::string_view path) {
@@ -72,18 +69,41 @@ struct Sdl {
     SDL_Renderer* renderer;
 };
 
+struct Side_Scrolling {
+    float speed_factor = 0.0f; // 1: camera speed; 0.5: half that etc.
+    float screen_x = 0.0f;
+};
+
+enum class Title_Effect_Status {
+    INITIAL,
+    SCROLLING_IN,
+    AT_DESTINATION,
+    SCROLLING_OUT
+};
+
+struct Title_Effect {
+    float speed = 0.0f;
+    float screen_y = 0.0f;
+    uint32_t on_timeout = 0;
+    uint32_t off_timeout = 0;
+    uint32_t base_ticks = SDL_GetTicks();
+    Title_Effect_Status status = Title_Effect_Status::INITIAL;
+};
+
 struct Layer {
-    Layer(const Texture_Slice& t_slice, float speed_factor) :
-        speed_factor{speed_factor},
+    Layer(const Texture_Slice& t_slice, Side_Scrolling side_scrolling) :
         t_slice{t_slice},
-        dest_x{0.0f},
-        dest_y{0.0f}
+        side_scrolling{side_scrolling}
+    {
+    }
+    Layer(const Texture_Slice& t_slice, Title_Effect title_effect) :
+        t_slice{t_slice},
+        title_effect{title_effect}
     {
     }
     Texture_Slice t_slice;
-    float speed_factor; // 1: camera speed; 0.5: half that etc.
-    float dest_x;
-    float dest_y;
+    Side_Scrolling side_scrolling;
+    Title_Effect title_effect;
 };
 
 struct Camera {
@@ -94,15 +114,13 @@ struct Scene {
     Scene(Sdl& sdl) : 
         texture{load_texture(sdl.renderer, TEXTURES_PATH)},
         layers{
-            Layer{bg_clouds, 0.15f},
-            Layer{mountains, 0.25f},
-            Layer{credits, 0.0f},
-            Layer{fg_clouds_2, 0.50f},
-            Layer{fg_clouds_1, 0.75f}
+            Layer{bg_clouds, Side_Scrolling{0.15f}}, 
+            Layer{mountains, Side_Scrolling{0.25f}},
+            Layer{credits, Title_Effect{-2.0f, WINDOW_HEIGHT, 2000, 3000}},
+            Layer{fg_clouds_2, Side_Scrolling{0.50f}},
+            Layer{fg_clouds_1, Side_Scrolling{0.75f}}
         }
     {
-        credits_layer = &layers[2];
-        credits_layer->dest_y = WINDOW_HEIGHT; // credits off-screen to the bottom
     }
     ~Scene() {
         SDL_DestroyTexture(texture);
@@ -110,7 +128,6 @@ struct Scene {
     SDL_Texture* texture;
     std::array<Layer, 5> layers;
     Camera camera{4.0f};
-    Layer* credits_layer;
 };
 
 struct Timer {
@@ -136,31 +153,93 @@ bool handle_input() {
     return true;
 }
 
+inline bool has_side_scrolling(const Layer& layer) {
+    return layer.side_scrolling.speed_factor != 0.0f;
+}
+
+inline bool has_title_effect(const Layer& layer) {
+    return layer.title_effect.speed != 0.0f;
+}
+
+inline bool reached_destination(const Title_Effect& title_effect, float dest_y) {
+    return title_effect.speed < 0.0f && dest_y <= 0.0f
+            || title_effect.speed > 0.0f && dest_y >= 0.0f;
+}
+
+inline bool went_off_screen(const Title_Effect& title_effect, float dest_y) {
+    return title_effect.speed < 0.0f && dest_y <= -WINDOW_HEIGHT
+            ||title_effect.speed > 0.0f && dest_y >= WINDOW_HEIGHT;
+}
+
 void update_scene(Scene& scene, Timer& timer) {
     for (Layer& layer : scene.layers) {
-        layer.dest_x -= scene.camera.x_speed * layer.speed_factor;
-        if (layer.dest_x < -WINDOW_WIDTH) {
-            layer.dest_x += WINDOW_WIDTH;
+        // side scrolling
+        if (has_side_scrolling(layer)) {
+            layer.side_scrolling.screen_x -= scene.camera.x_speed * layer.side_scrolling.speed_factor;
+            if (layer.side_scrolling.screen_x < -WINDOW_WIDTH) {
+                layer.side_scrolling.screen_x += WINDOW_WIDTH;
+            }
         }
-    }
-    if (scene.credits_layer->dest_y > 0 && timer.elapsed() >= CREDITS_DELAY) {
-        float dest_y = scene.credits_layer->dest_y - CREDITS_SPEED;
-        if (dest_y < 0) {
-            dest_y = 0;
+        // title effect
+        if (has_title_effect(layer)) {
+            float elapsed = SDL_GetTicks() - layer.title_effect.base_ticks;
+            switch (layer.title_effect.status) {
+            case Title_Effect_Status::INITIAL:
+                if (elapsed >= layer.title_effect.on_timeout) {
+                    layer.title_effect.status = Title_Effect_Status::SCROLLING_IN;
+                }
+                break;
+            case Title_Effect_Status::SCROLLING_IN: {
+                float dest_y = layer.title_effect.screen_y + layer.title_effect.speed;
+                if (reached_destination(layer.title_effect, dest_y)) {
+                    dest_y = 0.0f;
+                    layer.title_effect.status = Title_Effect_Status::AT_DESTINATION;
+                    layer.title_effect.base_ticks = SDL_GetTicks();
+                }
+                layer.title_effect.screen_y = dest_y;
+                break;
+            }
+            case Title_Effect_Status::AT_DESTINATION:
+                if (elapsed >= layer.title_effect.off_timeout) {
+                    layer.title_effect.status = Title_Effect_Status::SCROLLING_OUT;
+                }
+                break;
+            case Title_Effect_Status::SCROLLING_OUT: {
+                float dest_y = layer.title_effect.screen_y + layer.title_effect.speed;
+                if (went_off_screen(layer.title_effect, dest_y)) {
+                    dest_y = layer.title_effect.speed < 0.0f ? WINDOW_HEIGHT : -WINDOW_HEIGHT;
+                    layer.title_effect.status = Title_Effect_Status::INITIAL;
+                    layer.title_effect.base_ticks = SDL_GetTicks();
+                }
+                layer.title_effect.screen_y = dest_y;
+                break;
+            }}
         }
-        scene.credits_layer->dest_y = dest_y;
     }
 }
 
+inline void render_layer(const Layer& layer, SDL_Renderer* renderer,
+        SDL_Texture* texture, int dest_x, int dest_y) {
+    SDL_Rect src{layer.t_slice.x, layer.t_slice.y, layer.t_slice.w, layer.t_slice.h};
+    SDL_Rect dst{dest_x, dest_y, WINDOW_WIDTH, WINDOW_HEIGHT};
+    SDL_RenderCopy(renderer, texture, &src, &dst);
+}
+
 void render_scene(Sdl& sdl, Scene& scene) {
+    // clear
     SDL_SetRenderDrawColor(sdl.renderer, 0x08, 0xa9, 0xfc, 0xff);
     SDL_RenderClear(sdl.renderer);
+    // layers
     for (const Layer& layer : scene.layers) {
-        SDL_Rect src{layer.t_slice.x, layer.t_slice.y, layer.t_slice.w, layer.t_slice.h};
-        for (int i = 0, dest_x = layer.dest_x; i < 3; ++i) {
-            SDL_Rect dst{dest_x, int(layer.dest_y), WINDOW_WIDTH, WINDOW_HEIGHT};
-            SDL_RenderCopy(sdl.renderer, scene.texture, &src, &dst);
-            dest_x += WINDOW_WIDTH;
+        render_layer(layer, sdl.renderer, scene.texture, layer.side_scrolling.screen_x,
+                layer.title_effect.screen_y);
+        if (has_side_scrolling(layer)) {
+            int dest_x = layer.side_scrolling.screen_x;
+            for (int i = 0; i < 2; ++i) {
+                dest_x += WINDOW_WIDTH;
+                render_layer(layer, sdl.renderer, scene.texture, dest_x,
+                        layer.title_effect.screen_y);
+            }
         }
     }
     SDL_RenderPresent(sdl.renderer);
