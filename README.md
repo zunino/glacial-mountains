@@ -16,7 +16,7 @@ sudo apt install libsdl2-dev libsdl2-image-dev
 ```sh
 make
 ```
-Note: a compiler supporting C++-17 is required.
+Note: The included *Makefile* uses g++, but you should be able to build with any compiler supporting C++17.
 
 ## Artwork
 
