@@ -1,10 +1,11 @@
 #include <array>
+#include <string_view>
 #include <tuple>
 
 #include <SDL2/SDL.h>
 #include <SDL2/SDL_image.h>
 
-struct Texture_Slice {
+struct TextureSlice {
     int x, y, w, h;
 };
 
@@ -17,11 +18,11 @@ namespace {
     constexpr int DEFAULT_WIDTH = 384;
     constexpr int DEFAULT_HEIGHT = 216;
 
-    constexpr Texture_Slice bg_clouds{0, 0, DEFAULT_WIDTH, DEFAULT_HEIGHT};
-    constexpr Texture_Slice mountains{384, 0, DEFAULT_WIDTH, DEFAULT_HEIGHT};
-    constexpr Texture_Slice fg_clouds_2{0, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
-    constexpr Texture_Slice fg_clouds_1{384, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
-    constexpr Texture_Slice credits{384, 432, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+    constexpr TextureSlice bg_clouds{0, 0, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+    constexpr TextureSlice mountains{384, 0, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+    constexpr TextureSlice fg_clouds_2{0, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+    constexpr TextureSlice fg_clouds_1{384, 216, DEFAULT_WIDTH, DEFAULT_HEIGHT};
+    constexpr TextureSlice credits{384, 432, DEFAULT_WIDTH, DEFAULT_HEIGHT};
 }
 
 SDL_Texture* load_texture(SDL_Renderer* renderer, std::string_view path) {
@@ -68,41 +69,41 @@ struct Sdl {
     SDL_Renderer* renderer;
 };
 
-struct Side_Scrolling {
+struct SideScrolling {
     float speed_factor = 0.0f; // 1: camera speed; 0.5: half that etc.
     float screen_x = 0.0f;
 };
 
-enum class Title_Effect_Status {
+enum class TitleEffectStatus {
     INITIAL,
     SCROLLING_IN,
     AT_DESTINATION,
     SCROLLING_OUT
 };
 
-struct Title_Effect {
+struct TitleEffect {
     float speed = 0.0f;
     float screen_y = 0.0f;
     uint32_t on_timeout = 0;
     uint32_t off_timeout = 0;
     uint32_t base_ticks = SDL_GetTicks();
-    Title_Effect_Status status = Title_Effect_Status::INITIAL;
+    TitleEffectStatus status = TitleEffectStatus::INITIAL;
 };
 
 struct Layer {
-    Layer(const Texture_Slice& t_slice, Side_Scrolling side_scrolling) :
+    Layer(const TextureSlice& t_slice, SideScrolling side_scrolling) :
         t_slice{t_slice},
         side_scrolling{side_scrolling}
     {
     }
-    Layer(const Texture_Slice& t_slice, Title_Effect title_effect) :
+    Layer(const TextureSlice& t_slice, TitleEffect title_effect) :
         t_slice{t_slice},
         title_effect{title_effect}
     {
     }
-    Texture_Slice t_slice;
-    Side_Scrolling side_scrolling;
-    Title_Effect title_effect;
+    TextureSlice t_slice;
+    SideScrolling side_scrolling;
+    TitleEffect title_effect;
 };
 
 struct Camera {
@@ -113,11 +114,11 @@ struct Scene {
     Scene(Sdl& sdl) : 
         texture{load_texture(sdl.renderer, TEXTURES_PATH)},
         layers{
-            Layer{bg_clouds, Side_Scrolling{0.15f}}, 
-            Layer{mountains, Side_Scrolling{0.25f}},
-            Layer{credits, Title_Effect{-2.0f, WINDOW_HEIGHT, 2000, 3000}},
-            Layer{fg_clouds_2, Side_Scrolling{0.50f}},
-            Layer{fg_clouds_1, Side_Scrolling{0.75f}}
+            Layer{bg_clouds, SideScrolling{0.15f}}, 
+            Layer{mountains, SideScrolling{0.25f}},
+            Layer{credits, TitleEffect{-2.0f, WINDOW_HEIGHT, 2000, 3000}},
+            Layer{fg_clouds_2, SideScrolling{0.50f}},
+            Layer{fg_clouds_1, SideScrolling{0.75f}}
         }
     {
     }
@@ -160,12 +161,12 @@ inline bool has_title_effect(const Layer& layer) {
     return layer.title_effect.speed != 0.0f;
 }
 
-inline bool reached_destination(const Title_Effect& title_effect, float dest_y) {
+inline bool reached_destination(const TitleEffect& title_effect, float dest_y) {
     return title_effect.speed < 0.0f && dest_y <= 0.0f
             || title_effect.speed > 0.0f && dest_y >= 0.0f;
 }
 
-inline bool went_off_screen(const Title_Effect& title_effect, float dest_y) {
+inline bool went_off_screen(const TitleEffect& title_effect, float dest_y) {
     return title_effect.speed < 0.0f && dest_y <= -WINDOW_HEIGHT
             ||title_effect.speed > 0.0f && dest_y >= WINDOW_HEIGHT;
 }
@@ -183,31 +184,31 @@ void update_scene(Scene& scene, Timer& timer) {
         if (has_title_effect(layer)) {
             float elapsed = SDL_GetTicks() - layer.title_effect.base_ticks;
             switch (layer.title_effect.status) {
-            case Title_Effect_Status::INITIAL:
+            case TitleEffectStatus::INITIAL:
                 if (elapsed >= layer.title_effect.on_timeout) {
-                    layer.title_effect.status = Title_Effect_Status::SCROLLING_IN;
+                    layer.title_effect.status = TitleEffectStatus::SCROLLING_IN;
                 }
                 break;
-            case Title_Effect_Status::SCROLLING_IN: {
+            case TitleEffectStatus::SCROLLING_IN: {
                 float dest_y = layer.title_effect.screen_y + layer.title_effect.speed;
                 if (reached_destination(layer.title_effect, dest_y)) {
                     dest_y = 0.0f;
-                    layer.title_effect.status = Title_Effect_Status::AT_DESTINATION;
+                    layer.title_effect.status = TitleEffectStatus::AT_DESTINATION;
                     layer.title_effect.base_ticks = SDL_GetTicks();
                 }
                 layer.title_effect.screen_y = dest_y;
                 break;
             }
-            case Title_Effect_Status::AT_DESTINATION:
+            case TitleEffectStatus::AT_DESTINATION:
                 if (elapsed >= layer.title_effect.off_timeout) {
-                    layer.title_effect.status = Title_Effect_Status::SCROLLING_OUT;
+                    layer.title_effect.status = TitleEffectStatus::SCROLLING_OUT;
                 }
                 break;
-            case Title_Effect_Status::SCROLLING_OUT: {
+            case TitleEffectStatus::SCROLLING_OUT: {
                 float dest_y = layer.title_effect.screen_y + layer.title_effect.speed;
                 if (went_off_screen(layer.title_effect, dest_y)) {
                     dest_y = layer.title_effect.speed < 0.0f ? WINDOW_HEIGHT : -WINDOW_HEIGHT;
-                    layer.title_effect.status = Title_Effect_Status::INITIAL;
+                    layer.title_effect.status = TitleEffectStatus::INITIAL;
                     layer.title_effect.base_ticks = SDL_GetTicks();
                 }
                 layer.title_effect.screen_y = dest_y;
